@@ -974,6 +974,9 @@ export interface LearnerTrainingOverview {
         certificateEligible?: boolean
         deadline?: string | Date | null
         availableFrom?: string | Date | null
+        invitationCreatedAt?: string | Date | null
+        invitationViewedAt?: string | Date | null
+        latestSubmittedAt?: string | Date | null
         domain?: {
             id: string
             name: string
@@ -990,6 +993,8 @@ export interface LearnerTrainingOverview {
             title: string
             format: string
             scheduledAt?: string | Date | null
+            startsAt?: string | Date | null
+            createdAt: string | Date
             isRequired: boolean
         } | null
         userStatus: {
@@ -1006,6 +1011,7 @@ export interface LearnerTrainingOverview {
         examId: string
         examTitle: string
         submittedAt?: string | Date | null
+        startedAt: string | Date
         percentageScore?: number | null
         passed?: boolean | null
         domainName?: string | null
@@ -1058,12 +1064,14 @@ export interface CreateMcpAccessTokenPayload {
 export interface CourseProgressSummary {
     courseId: string
     title: string
+    slug: string
     thumbnail?: string | null
     instructorName?: string | null
     progress: number
     status: 'ACTIVE' | 'COMPLETED' | 'DROPPED'
     level: CourseLevel
     category: string
+    enrolledAt: string | Date
     lastAccessedAt?: string | Date | null
     completedAt?: string | Date | null
 }
@@ -1096,7 +1104,9 @@ export interface UserProgressOverview {
 export interface CourseDeadline {
     courseId: string
     title: string
+    slug: string
     deadline: Date | string
+    enrolledAt: Date | string
     progress: number
     status: 'ACTIVE' | 'COMPLETED' | 'DROPPED'
 }

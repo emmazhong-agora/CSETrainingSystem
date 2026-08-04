@@ -255,7 +255,16 @@ export class LearnerWorkspaceService {
                             status: true,
                             scheduledAt: true,
                             isRequired: true,
+                            createdAt: true,
                         },
+                    },
+                    invitations: {
+                        where: { userId },
+                        select: {
+                            createdAt: true,
+                            viewedAt: true,
+                        },
+                        take: 1,
                     },
                     attempts: {
                         where: { userId },
@@ -301,7 +310,6 @@ export class LearnerWorkspaceService {
                     { submittedAt: 'desc' },
                     { startedAt: 'desc' },
                 ],
-                take: 8,
             }),
         ])
 
@@ -313,6 +321,11 @@ export class LearnerWorkspaceService {
             const bestAttempt = exam.attempts
                 .filter((attempt) => attempt.percentageScore !== null)
                 .sort((a, b) => (b.percentageScore ?? 0) - (a.percentageScore ?? 0))[0]
+            const latestSubmittedAt = exam.attempts
+                .map((attempt) => attempt.submittedAt)
+                .filter((submittedAt): submittedAt is Date => submittedAt !== null)
+                .sort((a, b) => b.getTime() - a.getTime())[0] ?? null
+            const invitation = exam.invitations[0]
 
             return {
                 id: exam.id,
@@ -324,6 +337,9 @@ export class LearnerWorkspaceService {
                 starValue: exam.starValue,
                 deadline: exam.deadline,
                 availableFrom: exam.availableFrom,
+                invitationCreatedAt: invitation?.createdAt ?? null,
+                invitationViewedAt: invitation?.viewedAt ?? null,
+                latestSubmittedAt,
                 domain: exam.productDomain,
                 learningSeries: exam.learningSeries,
                 certificateEligible: exam.assessmentKind === 'FORMAL' && Boolean(exam.certificateTemplate?.isEnabled),
@@ -333,6 +349,8 @@ export class LearnerWorkspaceService {
                         title: exam.learningEvent.title,
                         format: exam.learningEvent.format,
                         scheduledAt: exam.learningEvent.scheduledAt,
+                        startsAt: exam.learningEvent.startsAt,
+                        createdAt: exam.learningEvent.createdAt,
                         isRequired: exam.learningEvent.isRequired,
                     }
                     : null,
@@ -403,6 +421,7 @@ export class LearnerWorkspaceService {
                 examId: attempt.examId,
                 examTitle: attempt.exam.title,
                 submittedAt: attempt.submittedAt,
+                startedAt: attempt.startedAt,
                 percentageScore: attempt.percentageScore,
                 passed: attempt.passed,
                 domainName: attempt.exam.productDomain?.name ?? null,

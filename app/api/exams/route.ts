@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/auth-middleware';
 import prisma from '@/lib/prisma';
-import { ExamStatus } from '@prisma/client';
+import { ExamAttemptStatus, ExamStatus } from '@prisma/client';
 
 // GET /api/exams - List exams available to the user
 export const GET = withAuth(async (req: NextRequest, user) => {
@@ -14,19 +14,28 @@ export const GET = withAuth(async (req: NextRequest, user) => {
     const { searchParams } = new URL(req.url);
     const courseId = searchParams.get('courseId');
 
-    // Get exams the user has access to:
-    // - Published exams they are explicitly invited to (assignment required).
+    // Include current assignments plus the user's submitted history. Historical
+    // attempts must remain visible after an exam is closed or archived.
     const exams = await prisma.exam.findMany({
       where: {
-        status: ExamStatus.PUBLISHED,
         AND: [
           // Filter by course if specified
           courseId ? { courseId } : {},
-          // User must have an explicit invitation
           {
-            invitations: {
-              some: { userId: user.id },
-            },
+            OR: [
+              {
+                status: { in: [ExamStatus.PUBLISHED, ExamStatus.CLOSED] },
+                invitations: { some: { userId: user.id } },
+              },
+              {
+                attempts: {
+                  some: {
+                    userId: user.id,
+                    status: { in: [ExamAttemptStatus.SUBMITTED, ExamAttemptStatus.GRADED] },
+                  },
+                },
+              },
+            ],
           },
         ],
       },
@@ -85,6 +94,7 @@ export const GET = withAuth(async (req: NextRequest, user) => {
 
       return {
         id: exam.id,
+        status: exam.status,
         title: exam.title,
         description: exam.description,
         assessmentKind: exam.assessmentKind,

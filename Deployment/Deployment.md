@@ -77,7 +77,7 @@ LLM_DEFAULT_PROVIDER=openai
 VEXKE_API_KEY=REPLACE_ME
 VEXKE_BASE_URL=https://v2.vexke.com/openai/v1
 VEXKE_CHAT_COMPLETIONS_PATH=/chat/completions
-VEXKE_MODEL_IDS=gpt-5.5,gpt-5.5-mini,gpt-5.4,gpt-5.4-mini
+VEXKE_MODEL_IDS=gpt-5.6-luna,gpt-5.6-terra,gpt-5.6-sol,gpt-5.5,gpt-5.5-mini,gpt-5.4,gpt-5.4-mini
 
 # Optional: CloudFront signed cookies for private course materials
 # CLOUDFRONT_DOMAIN=your-cloudfront-domain
@@ -228,7 +228,7 @@ LLM_DEFAULT_PROVIDER=openai
 VEXKE_API_KEY=<YOUR_VEXKE_KEY>
 VEXKE_BASE_URL=https://v2.vexke.com/openai/v1
 VEXKE_CHAT_COMPLETIONS_PATH=/chat/completions
-VEXKE_MODEL_IDS=gpt-5.5,gpt-5.5-mini,gpt-5.4,gpt-5.4-mini
+VEXKE_MODEL_IDS=gpt-5.6-luna,gpt-5.6-terra,gpt-5.6-sol,gpt-5.5,gpt-5.5-mini,gpt-5.4,gpt-5.4-mini
 EOF
 
 sudo chmod 600 /opt/cselearning.env

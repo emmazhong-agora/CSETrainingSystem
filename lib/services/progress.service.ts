@@ -209,6 +209,7 @@ export class ProgressService {
                         select: {
                             id: true,
                             title: true,
+                            slug: true,
                             thumbnail: true,
                             level: true,
                             category: true,
@@ -257,7 +258,6 @@ export class ProgressService {
                     },
                 },
                 orderBy: { updatedAt: 'desc' },
-                take: 10,
             }),
             prisma.certificate.findMany({
                 where: { userId },
@@ -286,14 +286,15 @@ export class ProgressService {
                 return {
                     courseId: enrollment.courseId,
                     title: enrollment.course.title,
+                    slug: enrollment.course.slug,
                     deadline,
+                    enrolledAt: enrollment.enrolledAt,
                     progress: Math.round(enrollment.progress),
                     status: enrollment.status,
                 }
             })
             .filter(item => item.deadline.getTime() > now)
             .sort((a, b) => a.deadline.getTime() - b.deadline.getTime())
-            .slice(0, 5)
 
         const courseInfoById = new Map<
             string,
@@ -345,14 +346,16 @@ export class ProgressService {
             courses: enrollments.map(enrollment => ({
                 courseId: enrollment.courseId,
                 title: enrollment.course.title,
+                slug: enrollment.course.slug,
                 thumbnail: enrollment.course.thumbnail,
                 instructorName: enrollment.course.instructor?.name ?? 'Instructor',
                 progress: Math.round(enrollment.progress),
                 status: enrollment.status,
                 level: enrollment.course.level,
                 category: enrollment.course.category,
-                lastAccessedAt: enrollment.lastAccessedAt ?? enrollment.enrolledAt,
-                completedAt: enrollment.completedAt ?? undefined,
+                enrolledAt: enrollment.enrolledAt,
+                lastAccessedAt: enrollment.lastAccessedAt,
+                completedAt: enrollment.completedAt,
             })),
             recentActivity: recentActivity.map(activity => ({
                 id: activity.id,

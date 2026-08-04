@@ -25,6 +25,8 @@ import {
     Eye,
     Search,
     Filter,
+    ChevronLeft,
+    ChevronRight,
 } from 'lucide-react'
 import Link from 'next/link'
 import type { Exam } from '@/types'
@@ -55,6 +57,9 @@ type ExamListItem = Exam & {
 }
 
 type DateFilter = 'ACTIVE' | 'ALL' | 'UPCOMING' | 'DUE_7_DAYS' | 'EXPIRED' | 'NO_DEADLINE' | 'CUSTOM_CREATED'
+type CompletedResultFilter = 'ALL' | 'PASSED' | 'NOT_PASSED' | 'PENDING'
+
+const EXAMS_PER_PAGE = 10
 
 type RawExamListItem = Exam & {
     questionCount?: number
@@ -88,10 +93,15 @@ export default function ExamsPage() {
     const [keywordFilter, setKeywordFilter] = useState('')
     const [labelFilter, setLabelFilter] = useState('ALL')
     const [domainFilter, setDomainFilter] = useState('ALL')
-    const [dateFilter, setDateFilter] = useState<DateFilter>('ACTIVE')
+    const [dateFilter, setDateFilter] = useState<DateFilter>('ALL')
     const [createdFromFilter, setCreatedFromFilter] = useState('')
     const [createdToFilter, setCreatedToFilter] = useState('')
     const [dateMenuOpen, setDateMenuOpen] = useState(false)
+    const [assignedPage, setAssignedPage] = useState(1)
+    const [completedPage, setCompletedPage] = useState(1)
+    const [completedKeywordFilter, setCompletedKeywordFilter] = useState('')
+    const [completedResultFilter, setCompletedResultFilter] = useState<CompletedResultFilter>('ALL')
+    const [completedDomainFilter, setCompletedDomainFilter] = useState('ALL')
 
     useEffect(() => {
         loadExams()
@@ -147,7 +157,7 @@ export default function ExamsPage() {
     }
 
     const isActiveExam = (exam: ExamListItem) => {
-        return !isDeadlinePassed(exam.deadline) && !isNotYetAvailable(exam.availableFrom)
+        return exam.status === 'PUBLISHED' && !isDeadlinePassed(exam.deadline) && !isNotYetAvailable(exam.availableFrom)
     }
 
     const isDueWithinDays = (deadline: string | Date | null | undefined, days: number) => {
@@ -261,6 +271,50 @@ export default function ExamsPage() {
         return searchable.includes(query)
     })
 
+    const assignedTotalPages = Math.max(1, Math.ceil(filteredExams.length / EXAMS_PER_PAGE))
+    const paginatedAssignedExams = filteredExams.slice(
+        (assignedPage - 1) * EXAMS_PER_PAGE,
+        assignedPage * EXAMS_PER_PAGE,
+    )
+
+    const completedExams = exams.filter((exam) => (exam.attemptResults?.length ?? 0) > 0)
+    const completedQuery = completedKeywordFilter.trim().toLowerCase()
+    const filteredCompletedExams = completedExams.filter((exam) => {
+        const latestAttempt = exam.attemptResults?.[0]
+        if (completedResultFilter === 'PASSED' && !exam.hasPassed) return false
+        if (completedResultFilter === 'NOT_PASSED' && (exam.hasPassed || latestAttempt?.passed !== false)) return false
+        if (completedResultFilter === 'PENDING' && latestAttempt?.passed !== null) return false
+        if (completedDomainFilter !== 'ALL' && exam.productDomain?.id !== completedDomainFilter) return false
+        if (!completedQuery) return true
+
+        return [exam.title, exam.description, exam.course?.title, exam.productDomain?.name]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(completedQuery)
+    })
+    const completedTotalPages = Math.max(1, Math.ceil(filteredCompletedExams.length / EXAMS_PER_PAGE))
+    const paginatedCompletedExams = filteredCompletedExams.slice(
+        (completedPage - 1) * EXAMS_PER_PAGE,
+        completedPage * EXAMS_PER_PAGE,
+    )
+
+    useEffect(() => {
+        setAssignedPage(1)
+    }, [keywordFilter, labelFilter, domainFilter, dateFilter, createdFromFilter, createdToFilter])
+
+    useEffect(() => {
+        setCompletedPage(1)
+    }, [completedKeywordFilter, completedResultFilter, completedDomainFilter])
+
+    useEffect(() => {
+        if (assignedPage > assignedTotalPages) setAssignedPage(assignedTotalPages)
+    }, [assignedPage, assignedTotalPages])
+
+    useEffect(() => {
+        if (completedPage > completedTotalPages) setCompletedPage(completedTotalPages)
+    }, [completedPage, completedTotalPages])
+
     if (loading) {
         return (
             <DashboardLayout>
@@ -272,15 +326,14 @@ export default function ExamsPage() {
     }
 
     const availableExams = exams.filter(e => isActiveExam(e))
-    const completedExams = exams.filter(e => e.hasPassed)
-    const passedCount = completedExams.length
+    const passedCount = exams.filter(e => e.hasPassed).length
     const totalAttempts = exams.reduce((sum, e) => sum + (e.userAttempts ?? 0), 0)
     const expiredCount = exams.filter(e => isDeadlinePassed(e.deadline)).length
     const hasActiveFilters =
         keywordFilter.trim() ||
         labelFilter !== 'ALL' ||
         domainFilter !== 'ALL' ||
-        dateFilter !== 'ACTIVE' ||
+        dateFilter !== 'ALL' ||
         createdFromFilter ||
         createdToFilter
 
@@ -338,7 +391,7 @@ export default function ExamsPage() {
                             <div>
                                 <CardTitle>Assigned exams</CardTitle>
                                 <CardDescription>
-                                    Showing {filteredExams.length} of {exams.length} assigned exams. Active exams are shown by default.
+                                    Showing {filteredExams.length} of {exams.length} assigned exams.
                                 </CardDescription>
                             </div>
                             {hasActiveFilters ? (
@@ -350,7 +403,7 @@ export default function ExamsPage() {
                                         setKeywordFilter('')
                                         setLabelFilter('ALL')
                                         setDomainFilter('ALL')
-                                        setDateFilter('ACTIVE')
+                                        setDateFilter('ALL')
                                         setCreatedFromFilter('')
                                         setCreatedToFilter('')
                                     }}
@@ -469,7 +522,7 @@ export default function ExamsPage() {
                                                     onClick={() => {
                                                         setCreatedFromFilter('')
                                                         setCreatedToFilter('')
-                                                        setDateFilter('ACTIVE')
+                                                        setDateFilter('ALL')
                                                         setDateMenuOpen(false)
                                                     }}
                                                 >
@@ -508,7 +561,7 @@ export default function ExamsPage() {
                                         <p className="text-sm text-muted-foreground">No exams match the current filters.</p>
                                     </div>
                                 ) : null}
-                                {filteredExams.map(exam => (
+                                {paginatedAssignedExams.map(exam => (
                                     <div
                                         key={exam.id}
                                         className="rounded-[1.35rem] border border-slate-200/70 bg-white p-4 transition-all duration-200 hover:border-[#00c2ff]/10 hover:shadow-lg hover:shadow-[#006688]/5"
@@ -531,6 +584,8 @@ export default function ExamsPage() {
                                                         </Badge>
                                                     ) : null}
                                                     {isDeadlinePassed(exam.deadline) ? <Badge variant="outline">Expired</Badge> : null}
+                                                    {exam.status === 'CLOSED' ? <Badge variant="outline">Closed</Badge> : null}
+                                                    {exam.status === 'ARCHIVED' ? <Badge variant="outline">Archived</Badge> : null}
                                                     {exam.certificateEligible ? <Badge variant="outline">Certificate on pass</Badge> : null}
                                                     {exam.countsTowardPerformance ? <Badge>Performance</Badge> : null}
                                                 </div>
@@ -581,28 +636,42 @@ export default function ExamsPage() {
                                             </div>
 
                                             <div className="flex flex-col gap-2 sm:flex-row lg:flex-col lg:items-end">
-                                                <Link href={`/exams/${exam.id}`}>
-                                                    <Button
-                                                        className="w-full sm:w-auto"
-                                                        disabled={isDeadlinePassed(exam.deadline) || ((exam.userAttempts ?? 0) >= exam.maxAttempts && !exam.hasPassed)}
-                                                    >
-                                                        {isDeadlinePassed(exam.deadline) ? (
-                                                            'Deadline Passed'
-                                                        ) : (exam.userAttempts ?? 0) === 0 ? (
-                                                            <>
-                                                                <Play className="mr-2 h-4 w-4" />
-                                                                Start Exam
-                                                            </>
-                                                        ) : (exam.userAttempts ?? 0) >= exam.maxAttempts ? (
-                                                            'View Results'
-                                                        ) : (
-                                                            <>
-                                                                <Play className="mr-2 h-4 w-4" />
-                                                                Retry
-                                                            </>
-                                                        )}
-                                                    </Button>
-                                                </Link>
+                                                {exam.status !== 'PUBLISHED' ? (
+                                                    exam.attemptResults?.[0] ? (
+                                                        <Link href={`/exams/${exam.id}/result?attemptId=${exam.attemptResults[0].id}`}>
+                                                            <Button variant="outline" className="w-full sm:w-auto">
+                                                                View Results
+                                                            </Button>
+                                                        </Link>
+                                                    ) : (
+                                                        <Button variant="outline" className="w-full sm:w-auto" disabled>
+                                                            Exam Closed
+                                                        </Button>
+                                                    )
+                                                ) : (
+                                                    <Link href={`/exams/${exam.id}`}>
+                                                        <Button
+                                                            className="w-full sm:w-auto"
+                                                            disabled={isDeadlinePassed(exam.deadline) || ((exam.userAttempts ?? 0) >= exam.maxAttempts && !exam.hasPassed)}
+                                                        >
+                                                            {isDeadlinePassed(exam.deadline) ? (
+                                                                'Deadline Passed'
+                                                            ) : (exam.userAttempts ?? 0) === 0 ? (
+                                                                <>
+                                                                    <Play className="mr-2 h-4 w-4" />
+                                                                    Start Exam
+                                                                </>
+                                                            ) : (exam.userAttempts ?? 0) >= exam.maxAttempts ? (
+                                                                'View Results'
+                                                            ) : (
+                                                                <>
+                                                                    <Play className="mr-2 h-4 w-4" />
+                                                                    Retry
+                                                                </>
+                                                            )}
+                                                        </Button>
+                                                    </Link>
+                                                )}
                                                 <Button
                                                     type="button"
                                                     variant="ghost"
@@ -707,57 +776,193 @@ export default function ExamsPage() {
                                         ) : null}
                                     </div>
                                 ))}
+                                <ExamPagination
+                                    page={assignedPage}
+                                    totalPages={assignedTotalPages}
+                                    totalItems={filteredExams.length}
+                                    onPageChange={setAssignedPage}
+                                />
                             </div>
                         )}
                     </CardContent>
                 </Card>
 
-                {/* Completed Exams */}
-                {completedExams.length > 0 && (
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="flex items-center gap-2">
-                                <Trophy className="h-5 w-5 text-primary" />
-                                Completed exams
-                            </CardTitle>
-                            <CardDescription>Assessments already cleared.</CardDescription>
-                        </CardHeader>
-                        <CardContent>
+                <Card>
+                    <CardHeader className="space-y-4">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                            <div>
+                                <CardTitle className="flex items-center gap-2">
+                                    <Trophy className="h-5 w-5 text-primary" />
+                                    Completed exams
+                                </CardTitle>
+                                <CardDescription>
+                                    Showing {filteredCompletedExams.length} of {completedExams.length} submitted assessments.
+                                </CardDescription>
+                            </div>
+                            {completedKeywordFilter || completedResultFilter !== 'ALL' || completedDomainFilter !== 'ALL' ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                        setCompletedKeywordFilter('')
+                                        setCompletedResultFilter('ALL')
+                                        setCompletedDomainFilter('ALL')
+                                    }}
+                                >
+                                    Clear filters
+                                </Button>
+                            ) : null}
+                        </div>
+
+                        <div className="grid gap-3 rounded-lg border border-slate-200/70 bg-slate-50/70 p-3 md:grid-cols-[1.4fr_1fr_1fr]">
+                            <div className="relative">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    value={completedKeywordFilter}
+                                    onChange={(event) => setCompletedKeywordFilter(event.target.value)}
+                                    placeholder="Search title, course, domain..."
+                                    className="bg-white pl-9"
+                                />
+                            </div>
+                            <Select value={completedResultFilter} onValueChange={(value) => setCompletedResultFilter(value as CompletedResultFilter)}>
+                                <SelectTrigger className="bg-white">
+                                    <SelectValue placeholder="Result" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="ALL">All results</SelectItem>
+                                    <SelectItem value="PASSED">Passed</SelectItem>
+                                    <SelectItem value="NOT_PASSED">Not passed</SelectItem>
+                                    <SelectItem value="PENDING">Pending grading</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <Select value={completedDomainFilter} onValueChange={setCompletedDomainFilter}>
+                                <SelectTrigger className="bg-white">
+                                    <SelectValue placeholder="Domain" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="ALL">All domains</SelectItem>
+                                    {domainOptions.map((domain) => (
+                                        <SelectItem key={domain.id} value={domain.id}>
+                                            {domain.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {paginatedCompletedExams.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 py-10 text-center">
+                                <CheckCircle className="mx-auto mb-3 h-9 w-9 text-muted-foreground" />
+                                <p className="text-sm text-muted-foreground">No completed exams match the current filters.</p>
+                            </div>
+                        ) : (
                             <div className="space-y-3">
-                                {completedExams.map(exam => (
-                                    <div
-                                        key={exam.id}
-                                        className="flex items-center justify-between rounded-2xl border border-emerald-100 bg-emerald-50/80 p-4 dark:bg-green-900/10"
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <CheckCircle className="h-5 w-5 text-green-600" />
-                                            <div>
-                                                <p className="font-medium">{exam.title}</p>
-                                                <p className="text-sm text-muted-foreground">
-                                                    Best Score: {exam.bestScore}%
-                                                </p>
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                    {exam.awardsStars && exam.starValue ? (
-                                                        <Badge variant="secondary">+{exam.starValue} stars</Badge>
-                                                    ) : null}
-                                                    {exam.certificateEligible ? (
-                                                        <Badge variant="outline">Certificate earned on pass</Badge>
-                                                    ) : null}
+                                {paginatedCompletedExams.map((exam) => {
+                                    const latestAttempt = exam.attemptResults![0]
+                                    const resultLabel = exam.hasPassed
+                                        ? 'Passed'
+                                        : latestAttempt.passed === false
+                                            ? 'Not passed'
+                                            : 'Pending grading'
+
+                                    return (
+                                        <div
+                                            key={exam.id}
+                                            className="flex flex-col gap-4 rounded-lg border border-slate-200/70 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+                                        >
+                                            <div className="flex min-w-0 items-start gap-3">
+                                                {exam.hasPassed ? (
+                                                    <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                                                ) : (
+                                                    <Clock className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" />
+                                                )}
+                                                <div className="min-w-0">
+                                                    <p className="font-medium">{exam.title}</p>
+                                                    <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                                                        <Badge variant={exam.hasPassed ? 'default' : 'secondary'}>{resultLabel}</Badge>
+                                                        {latestAttempt.percentageScore !== null ? (
+                                                            <span>Score: {latestAttempt.percentageScore}%</span>
+                                                        ) : null}
+                                                        <span>{formatAttemptSubmittedAt(latestAttempt.submittedAt)}</span>
+                                                    </div>
+                                                    <div className="mt-2 flex flex-wrap gap-2">
+                                                        {exam.productDomain ? <Badge variant="outline">{exam.productDomain.name}</Badge> : null}
+                                                        {exam.course ? <Badge variant="secondary">{exam.course.title}</Badge> : null}
+                                                        {exam.awardsStars && exam.starValue ? (
+                                                            <Badge variant="secondary">+{exam.starValue} stars</Badge>
+                                                        ) : null}
+                                                    </div>
                                                 </div>
                                             </div>
+                                            <Link href={`/exams/${exam.id}/result?attemptId=${latestAttempt.id}`}>
+                                                <Button variant="outline" size="sm" className="w-full sm:w-auto">
+                                                    <Eye className="mr-2 h-4 w-4" />
+                                                    View Results
+                                                </Button>
+                                            </Link>
                                         </div>
-                                        <Link href={`/exams/${exam.id}`}>
-                                            <Button variant="outline" size="sm">
-                                                View Exam
-                                            </Button>
-                                        </Link>
-                                    </div>
-                                ))}
+                                    )
+                                })}
+                                <ExamPagination
+                                    page={completedPage}
+                                    totalPages={completedTotalPages}
+                                    totalItems={filteredCompletedExams.length}
+                                    onPageChange={setCompletedPage}
+                                />
                             </div>
-                        </CardContent>
-                    </Card>
-                )}
+                        )}
+                    </CardContent>
+                </Card>
             </div>
         </DashboardLayout>
+    )
+}
+
+function ExamPagination({
+    page,
+    totalPages,
+    totalItems,
+    onPageChange,
+}: {
+    page: number
+    totalPages: number
+    totalItems: number
+    onPageChange: (page: number) => void
+}) {
+    if (totalItems <= EXAMS_PER_PAGE) return null
+
+    const firstItem = (page - 1) * EXAMS_PER_PAGE + 1
+    const lastItem = Math.min(page * EXAMS_PER_PAGE, totalItems)
+
+    return (
+        <div className="flex flex-col gap-3 border-t border-slate-200/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+                Showing {firstItem}-{lastItem} of {totalItems} · Page {page} of {totalPages}
+            </p>
+            <div className="flex items-center gap-2">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => onPageChange(page - 1)}
+                >
+                    <ChevronLeft className="mr-1 h-4 w-4" />
+                    Previous
+                </Button>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= totalPages}
+                    onClick={() => onPageChange(page + 1)}
+                >
+                    Next
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
+            </div>
+        </div>
     )
 }

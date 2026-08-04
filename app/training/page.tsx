@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
     ResponsiveContainer,
     LineChart,
@@ -22,7 +23,10 @@ import { formatDate } from '@/lib/utils'
 import {
     BookOpen,
     CalendarClock,
+    CalendarDays,
     CheckCircle2,
+    ChevronLeft,
+    ChevronRight,
     Clock,
     Loader2,
     Play,
@@ -30,12 +34,53 @@ import {
     TrendingUp,
 } from 'lucide-react'
 
+type TrainingDrilldown = 'all-courses' | 'in-progress' | 'pending-assessments' | 'passed-assessments'
+
+const isTrainingDrilldown = (value: string | null): value is TrainingDrilldown =>
+    value === 'all-courses' ||
+    value === 'in-progress' ||
+    value === 'pending-assessments' ||
+    value === 'passed-assessments'
+
+const PAGE_SIZE = 5
+
 export default function TrainingPage() {
+    const searchParams = useSearchParams()
     const [trainingOverview, setTrainingOverview] = useState<LearnerTrainingOverview | null>(null)
     const [progressOverview, setProgressOverview] = useState<UserProgressOverview | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [refreshIndex, setRefreshIndex] = useState(0)
+    const [dateFrom, setDateFrom] = useState('')
+    const [dateTo, setDateTo] = useState('')
+    const [coursePage, setCoursePage] = useState(1)
+    const [assessmentPage, setAssessmentPage] = useState(1)
+    const [eventPage, setEventPage] = useState(1)
+    const [targetPage, setTargetPage] = useState(1)
+    const requestedDrilldown = searchParams.get('view')
+    const drilldown = isTrainingDrilldown(requestedDrilldown) ? requestedDrilldown : null
+
+    const dateBounds = useMemo(() => ({
+        from: dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null,
+        to: dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : null,
+    }), [dateFrom, dateTo])
+
+    const isWithinDateRange = useCallback((value: string | Date | null | undefined) => {
+        if (!dateBounds.from && !dateBounds.to) return true
+        if (!value) return false
+        const timestamp = new Date(value).getTime()
+        if (!Number.isFinite(timestamp)) return false
+        if (dateBounds.from && timestamp < dateBounds.from) return false
+        if (dateBounds.to && timestamp > dateBounds.to) return false
+        return true
+    }, [dateBounds])
+
+    useEffect(() => {
+        setCoursePage(1)
+        setAssessmentPage(1)
+        setEventPage(1)
+        setTargetPage(1)
+    }, [dateFrom, dateTo, drilldown])
 
     useEffect(() => {
         let cancelled = false
@@ -79,18 +124,82 @@ export default function TrainingPage() {
         }
     }, [refreshIndex])
 
-    const activityChartData = useMemo(() => {
-        if (!progressOverview) return []
+    const filteredCourses = useMemo(
+        () => progressOverview?.courses.filter((course) =>
+            isWithinDateRange(course.lastAccessedAt ?? course.enrolledAt)
+        ) ?? [],
+        [isWithinDateRange, progressOverview]
+    )
 
-        return [...progressOverview.recentActivity]
+    const filteredAssignedExams = useMemo(
+        () => trainingOverview?.assignedExams.filter((exam) =>
+            isWithinDateRange(exam.latestSubmittedAt ?? exam.invitationViewedAt ?? exam.invitationCreatedAt)
+        ) ?? [],
+        [isWithinDateRange, trainingOverview]
+    )
+
+    const filteredEvents = useMemo(
+        () => trainingOverview?.upcomingEvents.filter((event) =>
+            isWithinDateRange(event.startsAt ?? event.scheduledAt ?? event.createdAt)
+        ) ?? [],
+        [isWithinDateRange, trainingOverview]
+    )
+
+    const filteredRecentCompletions = useMemo(
+        () => trainingOverview?.recentCompletions.filter((attempt) =>
+            isWithinDateRange(attempt.submittedAt ?? attempt.startedAt)
+        ) ?? [],
+        [isWithinDateRange, trainingOverview]
+    )
+
+    const filteredActivity = useMemo(
+        () => progressOverview?.recentActivity.filter((entry) => isWithinDateRange(entry.updatedAt)) ?? [],
+        [isWithinDateRange, progressOverview]
+    )
+
+    const filteredTargets = useMemo(
+        () => progressOverview?.upcomingDeadlines.filter((target) => isWithinDateRange(target.deadline)) ?? [],
+        [isWithinDateRange, progressOverview]
+    )
+
+    const activityChartData = useMemo(() => {
+        return [...filteredActivity]
             .sort((a, b) => new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime())
             .map((entry) => ({
                 date: formatDate(entry.updatedAt),
                 minutes: Math.round(entry.watchedDuration / 60),
             }))
-    }, [progressOverview])
+    }, [filteredActivity])
 
     const handleRefresh = () => setRefreshIndex((prev) => prev + 1)
+
+    const visibleCourses = useMemo(
+        () => filteredCourses.filter((course) => drilldown !== 'in-progress' || course.status !== 'COMPLETED'),
+        [drilldown, filteredCourses]
+    )
+
+    const visibleAssignedExams = useMemo(
+        () => filteredAssignedExams.filter((exam) =>
+            drilldown !== 'pending-assessments' || (!exam.userStatus.hasPassed && exam.userStatus.remainingAttempts > 0)
+        ),
+        [drilldown, filteredAssignedExams]
+    )
+
+    const visibleRecentCompletions = useMemo(
+        () => filteredRecentCompletions.filter((attempt) => drilldown !== 'passed-assessments' || attempt.passed),
+        [drilldown, filteredRecentCompletions]
+    )
+
+    const pagedCourses = visibleCourses.slice((coursePage - 1) * PAGE_SIZE, coursePage * PAGE_SIZE)
+    const pagedAssessments = visibleAssignedExams.slice((assessmentPage - 1) * PAGE_SIZE, assessmentPage * PAGE_SIZE)
+    const pagedEvents = filteredEvents.slice((eventPage - 1) * PAGE_SIZE, eventPage * PAGE_SIZE)
+    const pagedTargets = filteredTargets.slice((targetPage - 1) * PAGE_SIZE, targetPage * PAGE_SIZE)
+
+    const pendingAssessmentCount = filteredAssignedExams.filter(
+        (exam) => !exam.userStatus.hasPassed && exam.userStatus.remainingAttempts > 0
+    ).length
+    const passedAssessmentCount = filteredAssignedExams.filter((exam) => exam.userStatus.hasPassed).length
+    const inProgressCourseCount = filteredCourses.filter((course) => course.status !== 'COMPLETED').length
 
     return (
         <DashboardLayout>
@@ -135,24 +244,60 @@ export default function TrainingPage() {
                             </div>
                         ) : null}
 
+                        <div className="flex flex-wrap items-end justify-between gap-4 border-y bg-muted/30 px-4 py-4">
+                            <div className="flex flex-wrap items-end gap-3">
+                                <div className="space-y-1.5">
+                                    <label htmlFor="learning-date-from" className="text-xs font-medium text-muted-foreground">From</label>
+                                    <input
+                                        id="learning-date-from"
+                                        type="date"
+                                        value={dateFrom}
+                                        max={dateTo || undefined}
+                                        onChange={(event) => setDateFrom(event.target.value)}
+                                        className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label htmlFor="learning-date-to" className="text-xs font-medium text-muted-foreground">To</label>
+                                    <input
+                                        id="learning-date-to"
+                                        type="date"
+                                        value={dateTo}
+                                        min={dateFrom || undefined}
+                                        onChange={(event) => setDateTo(event.target.value)}
+                                        className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                                    />
+                                </div>
+                                {dateFrom || dateTo ? (
+                                    <Button variant="ghost" onClick={() => { setDateFrom(''); setDateTo('') }}>
+                                        Clear dates
+                                    </Button>
+                                ) : null}
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <CalendarDays className="h-4 w-4" />
+                                {dateFrom || dateTo ? 'Filtered by relevant activity date' : 'All dates'}
+                            </div>
+                        </div>
+
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-                            <SummaryCard title="Enrolled Courses" value={progressOverview?.stats.totalEnrolled ?? 0} helper="Courses currently assigned" icon={BookOpen} />
-                            <SummaryCard title="In Progress" value={progressOverview?.stats.inProgressCourses ?? 0} helper="Courses actively underway" icon={TrendingUp} />
-                            <SummaryCard title="Pending Assessments" value={trainingOverview?.summary.pendingExams ?? 0} helper="Still available to complete" icon={Clock} />
-                            <SummaryCard title="Passed" value={trainingOverview?.summary.passedExams ?? 0} helper="Successfully completed assessments" icon={CheckCircle2} />
-                            <SummaryCard title="Upcoming Events" value={trainingOverview?.summary.upcomingEvents ?? 0} helper="Linked learning sessions" icon={CalendarClock} />
-                            <SummaryCard title="Learning Hours" value={Number((progressOverview?.stats.hoursLearned ?? 0).toFixed(1))} helper="Total study time logged" icon={Clock} />
+                            <SummaryCard href="/training?view=all-courses#continue-courses" title="Enrolled Courses" value={filteredCourses.length} helper="Courses in this date range" icon={BookOpen} />
+                            <SummaryCard href="/training?view=in-progress#continue-courses" title="In Progress" value={inProgressCourseCount} helper="Not yet completed" icon={TrendingUp} />
+                            <SummaryCard href="/training?view=pending-assessments#assigned-assessments" title="Pending Assessments" value={pendingAssessmentCount} helper="Still available to complete" icon={Clock} />
+                            <SummaryCard href="/training?view=passed-assessments#recent-completions" title="Passed" value={passedAssessmentCount} helper="Passed in this date range" icon={CheckCircle2} />
+                            <SummaryCard href="/training#upcoming-events" title="Upcoming Events" value={filteredEvents.length} helper="Events in this date range" icon={CalendarClock} />
+                            <SummaryCard href="/training#study-activity" title="Learning Hours" value={Number((progressOverview?.stats.hoursLearned ?? 0).toFixed(1))} helper="All-time study time logged" icon={Clock} />
                         </div>
 
                         <div className="grid gap-6 xl:grid-cols-[1.1fr_1.4fr]">
-                            <Card>
+                            <Card id="continue-courses" className="scroll-mt-24">
                                 <CardHeader>
-                                    <CardTitle>Continue Courses</CardTitle>
-                                    <CardDescription>Resume courses you are enrolled in.</CardDescription>
+                                    <CardTitle>{drilldown === 'in-progress' ? 'Courses In Progress' : 'Continue Courses'}</CardTitle>
+                                    <CardDescription>{drilldown === 'in-progress' ? 'Assigned courses that are not yet complete.' : 'Resume courses you are enrolled in.'}</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    {progressOverview?.courses.length ? (
-                                        progressOverview.courses.map((course) => (
+                                    {pagedCourses.length ? (
+                                        pagedCourses.map((course) => (
                                             <div
                                                 key={course.courseId}
                                                 className="flex flex-col justify-between gap-4 rounded-lg border p-4 md:flex-row md:items-center"
@@ -171,29 +316,39 @@ export default function TrainingPage() {
                                                         </span>
                                                     </div>
                                                 </div>
-                                                <div className="w-full md:w-64">
+                                                <div className="w-full space-y-3 md:w-64">
                                                     <div className="mb-1 flex items-center justify-between text-sm">
                                                         <span>Progress</span>
                                                         <span className="font-medium">{course.progress}%</span>
                                                     </div>
                                                     <Progress value={course.progress} />
+                                                    <Link href={`/courses/${course.slug}`}>
+                                                        <Button variant="outline" size="sm" className="w-full">
+                                                            Open course
+                                                        </Button>
+                                                    </Link>
                                                 </div>
                                             </div>
                                         ))
                                     ) : (
                                         <p className="text-sm text-muted-foreground">You have not enrolled in any courses yet.</p>
                                     )}
+                                    <PaginationControls
+                                        page={coursePage}
+                                        totalItems={visibleCourses.length}
+                                        onPageChange={setCoursePage}
+                                    />
                                 </CardContent>
                             </Card>
 
-                            <Card>
+                            <Card id="assigned-assessments" className="scroll-mt-24">
                                 <CardHeader>
-                                    <CardTitle>Assigned Assessments</CardTitle>
-                                    <CardDescription>Everything currently available in your learning queue.</CardDescription>
+                                    <CardTitle>{drilldown === 'pending-assessments' ? 'Pending Assessments' : 'Assigned Assessments'}</CardTitle>
+                                    <CardDescription>{drilldown === 'pending-assessments' ? 'Assessments that remain available for you to complete.' : 'Everything currently available in your learning queue.'}</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-3">
-                                    {trainingOverview?.assignedExams.length ? (
-                                        trainingOverview.assignedExams.map((exam) => (
+                                    {pagedAssessments.length ? (
+                                        pagedAssessments.map((exam) => (
                                             <div key={exam.id} className="rounded-lg border p-4">
                                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                                     <div>
@@ -229,12 +384,17 @@ export default function TrainingPage() {
                                     ) : (
                                         <p className="text-sm text-muted-foreground">No assigned assessments yet.</p>
                                     )}
+                                    <PaginationControls
+                                        page={assessmentPage}
+                                        totalItems={visibleAssignedExams.length}
+                                        onPageChange={setAssessmentPage}
+                                    />
                                 </CardContent>
                             </Card>
                         </div>
 
                         <div className="grid gap-6 lg:grid-cols-5">
-                            <Card className="lg:col-span-3">
+                            <Card id="study-activity" className="scroll-mt-24 lg:col-span-3">
                                 <CardHeader>
                                     <CardTitle>Study Activity</CardTitle>
                                     <CardDescription>Minutes watched per session.</CardDescription>
@@ -265,8 +425,8 @@ export default function TrainingPage() {
                                 </CardHeader>
                                 <CardContent>
                                     <div className="max-h-[280px] space-y-3 overflow-y-auto pr-2">
-                                        {progressOverview?.recentActivity.length ? (
-                                            progressOverview.recentActivity.map((entry) => (
+                                        {filteredActivity.length ? (
+                                            filteredActivity.map((entry) => (
                                                 <div key={entry.id} className="rounded-lg border p-3">
                                                     <div className="flex items-center justify-between">
                                                         <p className="text-sm font-medium">{entry.lessonTitle}</p>
@@ -293,14 +453,14 @@ export default function TrainingPage() {
                         </div>
 
                         <div className="grid gap-6 xl:grid-cols-[1.1fr_1.4fr]">
-                            <Card>
+                            <Card id="upcoming-events" className="scroll-mt-24">
                                 <CardHeader>
                                     <CardTitle>Upcoming Learning Events</CardTitle>
                                     <CardDescription>Event-linked sessions associated with your assigned learning.</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-3">
-                                    {trainingOverview?.upcomingEvents.length ? (
-                                        trainingOverview.upcomingEvents.map((event) => (
+                                    {pagedEvents.length ? (
+                                        pagedEvents.map((event) => (
                                             <div key={event.id} className="rounded-lg border p-4">
                                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                                     <div>
@@ -308,7 +468,13 @@ export default function TrainingPage() {
                                                             <Badge variant="outline">{event.format.replaceAll('_', ' ')}</Badge>
                                                             {event.isRequired ? <Badge>Required</Badge> : null}
                                                         </div>
-                                                        <p className="mt-3 font-semibold">{event.title}</p>
+                                                        {event.linkedExams[0] ? (
+                                                            <Link href={`/exams/${event.linkedExams[0].id}`} className="mt-3 block font-semibold hover:text-[#006688] hover:underline">
+                                                                {event.title}
+                                                            </Link>
+                                                        ) : (
+                                                            <p className="mt-3 font-semibold">{event.title}</p>
+                                                        )}
                                                         <p className="mt-1 text-sm text-muted-foreground">
                                                             {event.domain?.name ?? 'General Training'} · {event.scheduledAt ? new Date(event.scheduledAt).toLocaleString() : 'Schedule pending'}
                                                         </p>
@@ -321,23 +487,33 @@ export default function TrainingPage() {
                                                             <Badge variant="outline">{exam.title}</Badge>
                                                         </Link>
                                                     ))}
+                                                    {event.linkedExams[0] ? (
+                                                        <Link href={`/exams/${event.linkedExams[0].id}`}>
+                                                            <Button variant="outline" size="sm">Open assessment</Button>
+                                                        </Link>
+                                                    ) : null}
                                                 </div>
                                             </div>
                                         ))
                                     ) : (
                                         <p className="text-sm text-muted-foreground">No upcoming linked events.</p>
                                     )}
+                                    <PaginationControls
+                                        page={eventPage}
+                                        totalItems={filteredEvents.length}
+                                        onPageChange={setEventPage}
+                                    />
                                 </CardContent>
                             </Card>
 
-                            <Card>
+                            <Card id="recent-completions" className="scroll-mt-24">
                                 <CardHeader>
-                                    <CardTitle>Recent Completions</CardTitle>
-                                    <CardDescription>Your latest submitted or graded attempts.</CardDescription>
+                                    <CardTitle>{drilldown === 'passed-assessments' ? 'Passed Assessments' : 'Recent Completions'}</CardTitle>
+                                    <CardDescription>{drilldown === 'passed-assessments' ? 'Your submitted or graded assessments that passed.' : 'Your latest submitted or graded attempts.'}</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-3">
-                                    {trainingOverview?.recentCompletions.length ? (
-                                        trainingOverview.recentCompletions.map((attempt) => (
+                                    {visibleRecentCompletions.length ? (
+                                        visibleRecentCompletions.map((attempt) => (
                                             <div key={attempt.attemptId} className="rounded-lg border p-4">
                                                 <div className="flex flex-wrap items-start justify-between gap-3">
                                                     <div>
@@ -379,8 +555,8 @@ export default function TrainingPage() {
                             </CardHeader>
                             <CardContent>
                                 <div className="max-h-[280px] space-y-3 overflow-y-auto pr-2">
-                                    {progressOverview?.upcomingDeadlines.length ? (
-                                        progressOverview.upcomingDeadlines.map((deadline) => {
+                                    {pagedTargets.length ? (
+                                        pagedTargets.map((deadline) => {
                                             const daysLeft = Math.max(
                                                 0,
                                                 Math.ceil(
@@ -408,9 +584,14 @@ export default function TrainingPage() {
                                                             </div>
                                                             <Progress value={deadline.progress} />
                                                         </div>
-                                                        {deadline.status !== 'COMPLETED' ? (
-                                                            <Badge variant="secondary">In progress</Badge>
-                                                        ) : null}
+                                                        <div className="flex items-center gap-2">
+                                                            {deadline.status !== 'COMPLETED' ? (
+                                                                <Badge variant="secondary">In progress</Badge>
+                                                            ) : null}
+                                                            <Link href={`/courses/${deadline.slug}`}>
+                                                                <Button variant="outline" size="sm">Open course</Button>
+                                                            </Link>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             )
@@ -420,6 +601,11 @@ export default function TrainingPage() {
                                             No upcoming targets. Enroll in a course to get started.
                                         </p>
                                     )}
+                                    <PaginationControls
+                                        page={targetPage}
+                                        totalItems={filteredTargets.length}
+                                        onPageChange={setTargetPage}
+                                    />
                                 </div>
                             </CardContent>
                         </Card>
@@ -431,26 +617,77 @@ export default function TrainingPage() {
 }
 
 function SummaryCard({
+    href,
     title,
     value,
     helper,
     icon: Icon,
 }: {
+    href: string
     title: string
     value: number
     helper: string
     icon: React.ComponentType<{ className?: string }>
 }) {
     return (
-        <Card>
-            <CardHeader className="pb-2">
-                <CardDescription>{title}</CardDescription>
-                <CardTitle className="text-3xl">{value}</CardTitle>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between">
-                <p className="text-sm text-muted-foreground">{helper}</p>
-                <Icon className="h-5 w-5 text-[#006688]" />
-            </CardContent>
-        </Card>
+        <Link href={href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#008ebc] focus-visible:ring-offset-2">
+            <Card className="h-full transition-colors hover:border-[#008ebc] hover:bg-cyan-50/40">
+                <CardHeader className="pb-2">
+                    <CardDescription>{title}</CardDescription>
+                    <CardTitle className="text-3xl">{value}</CardTitle>
+                </CardHeader>
+                <CardContent className="flex items-center justify-between">
+                    <p className="text-sm text-muted-foreground">{helper}</p>
+                    <Icon className="h-5 w-5 text-[#006688]" />
+                </CardContent>
+            </Card>
+        </Link>
+    )
+}
+
+function PaginationControls({
+    page,
+    totalItems,
+    onPageChange,
+}: {
+    page: number
+    totalItems: number
+    onPageChange: (page: number) => void
+}) {
+    const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE))
+    if (totalItems <= PAGE_SIZE) return null
+
+    return (
+        <div className="flex items-center justify-between border-t pt-3">
+            <p className="text-xs text-muted-foreground">
+                Page {page} of {totalPages} · {totalItems} items
+            </p>
+            <div className="flex items-center gap-1">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={page <= 1}
+                    onClick={() => onPageChange(Math.max(1, page - 1))}
+                    aria-label="Previous page"
+                    title="Previous page"
+                >
+                    <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={page >= totalPages}
+                    onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+                    aria-label="Next page"
+                    title="Next page"
+                >
+                    <ChevronRight className="h-4 w-4" />
+                </Button>
+            </div>
+        </div>
     )
 }

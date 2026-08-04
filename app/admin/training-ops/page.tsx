@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -13,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { FunnelCard, OpsHero, SectionHeading, SignalCard } from '@/components/training-ops/overview-primitives'
+import { OpsHero, SectionHeading, SignalCard } from '@/components/training-ops/overview-primitives'
 import { ApiClient } from '@/lib/api-client'
 import type { TrainingOpsAdminReport, TrainingOpsLearnerRiskStatus, TrainingOpsReportRange } from '@/types'
 import {
@@ -64,6 +65,18 @@ const RANGE_OPTIONS: Array<{ value: TrainingOpsReportRange; label: string }> = [
     { value: 'ytd', label: 'This year' },
     { value: 'all', label: 'All time' },
 ]
+
+type LearnerActionFilter = 'overdue' | 'retake' | 'no-attempt' | 'learning-stalled'
+
+const ACTION_FILTER_LABELS: Record<LearnerActionFilter, string> = {
+    overdue: 'Overdue assessment',
+    retake: 'Retake available',
+    'no-attempt': 'No attempt yet',
+    'learning-stalled': 'Learning stalled',
+}
+
+const isLearnerActionFilter = (value: string | null): value is LearnerActionFilter =>
+    value === 'overdue' || value === 'retake' || value === 'no-attempt' || value === 'learning-stalled'
 
 const exportLearnersCsv = (report: TrainingOpsAdminReport) => {
     const headers = [
@@ -119,6 +132,7 @@ const exportLearnersCsv = (report: TrainingOpsAdminReport) => {
 }
 
 export default function TrainingOpsDashboardPage() {
+    const searchParams = useSearchParams()
     const [report, setReport] = useState<TrainingOpsAdminReport | null>(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
@@ -127,6 +141,10 @@ export default function TrainingOpsDashboardPage() {
     const [includeAdmins, setIncludeAdmins] = useState(true)
     const [excludedUserIds, setExcludedUserIds] = useState<string[]>([])
     const [filterDialogOpen, setFilterDialogOpen] = useState(false)
+    const requestedLearnerActionFilter = searchParams.get('learnerFilter')
+    const learnerActionFilter = isLearnerActionFilter(requestedLearnerActionFilter)
+        ? requestedLearnerActionFilter
+        : null
 
     useEffect(() => {
         const loadData = async () => {
@@ -152,16 +170,24 @@ export default function TrainingOpsDashboardPage() {
     const filteredLearners = useMemo(() => {
         if (!report) return []
         const query = learnerSearch.trim().toLowerCase()
-        if (!query) return report.learnerPerformance
-        return report.learnerPerformance.filter((learner) =>
-            learner.name.toLowerCase().includes(query) ||
-            learner.email.toLowerCase().includes(query) ||
-            learner.role.toLowerCase().includes(query) ||
-            learner.department?.toLowerCase().includes(query) ||
-            learner.title?.toLowerCase().includes(query) ||
-            learner.riskStatus.toLowerCase().includes(query)
-        )
-    }, [learnerSearch, report])
+        return report.learnerPerformance.filter((learner) => {
+            const matchesAction = !learnerActionFilter || (
+                learnerActionFilter === 'overdue' ? learner.overdueExams > 0 :
+                    learnerActionFilter === 'retake' ? learner.retakeNeeded > 0 :
+                        learnerActionFilter === 'no-attempt' ? learner.examInvitations > 0 && learner.examsAttempted === 0 :
+                            learner.courseAssigned > 0 && learner.averageCourseProgress < 60
+            )
+            const matchesSearch = !query ||
+                learner.name.toLowerCase().includes(query) ||
+                learner.email.toLowerCase().includes(query) ||
+                learner.role.toLowerCase().includes(query) ||
+                learner.department?.toLowerCase().includes(query) ||
+                learner.title?.toLowerCase().includes(query) ||
+                learner.riskStatus.toLowerCase().includes(query)
+
+            return matchesAction && matchesSearch
+        })
+    }, [learnerActionFilter, learnerSearch, report])
 
     const actionSummary = useMemo(() => {
         const learners = report?.learnerPerformance ?? []
@@ -344,38 +370,6 @@ export default function TrainingOpsDashboardPage() {
                             ) : null}
                         </div>
 
-                        <section className="space-y-5">
-                            <SectionHeading
-                                eyebrow="Flow"
-                                title="Participation to evidence"
-                                description="Course records and learner assessment coverage are shown as separate funnels because their units and evidence strength are different."
-                            />
-                            <div className="grid gap-6 xl:grid-cols-2">
-                                <FunnelCard
-                                    title="Required learning flow"
-                                    description="Assignments created in the selected period. Content completion shows exposure, not verified mastery."
-                                    icon={BookOpen}
-                                    steps={[
-                                        { label: 'Assigned course records', value: report.summary.courseAssignments },
-                                        { label: 'Started', value: report.summary.courseStarted },
-                                        { label: 'Content completed', value: report.summary.courseCompleted, note: 'Mastery verification is reported separately.' },
-                                    ]}
-                                    emptyMessage="No course assignments were created in this reporting period."
-                                />
-                                <FunnelCard
-                                    title="Assessment coverage"
-                                    description="Invitations and submissions in the selected period, with performance evidence isolated from practice activity."
-                                    icon={FileText}
-                                    steps={[
-                                        { label: 'Learners in assessment scope', value: report.summary.assessmentLearners, note: `${report.summary.invitedLearners} received invitations in this period.` },
-                                        { label: 'Learners participating', value: report.summary.participatingLearners },
-                                        { label: 'Learners with performance evidence', value: report.summary.performanceParticipatingLearners, note: 'Only exams marked as counting toward performance.' },
-                                    ]}
-                                    emptyMessage="No published exam invitations were created in this reporting period."
-                                />
-                            </div>
-                        </section>
-
                         <section id="action-center" className="scroll-mt-24 space-y-5">
                             <SectionHeading
                                 eyebrow="Intervention"
@@ -384,16 +378,20 @@ export default function TrainingOpsDashboardPage() {
                             />
                             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                                 {[
-                                    { label: 'Overdue assessment', value: actionSummary.overdue, hint: 'Past deadline with no attempt', tone: 'border-rose-200 bg-rose-50 text-rose-800' },
-                                    { label: 'Retake available', value: actionSummary.retake, hint: 'Failed with attempts remaining', tone: 'border-amber-200 bg-amber-50 text-amber-800' },
-                                    { label: 'No attempt yet', value: actionSummary.noAttempt, hint: 'Invited but not started', tone: 'border-sky-200 bg-sky-50 text-sky-800' },
-                                    { label: 'Learning stalled', value: actionSummary.lowProgress, hint: 'Assigned and below 60%', tone: 'border-slate-200 bg-slate-50 text-slate-800' },
+                                    { filter: 'overdue' as const, label: 'Overdue assessment', value: actionSummary.overdue, hint: 'Past deadline with no attempt', tone: 'border-rose-200 bg-rose-50 text-rose-800' },
+                                    { filter: 'retake' as const, label: 'Retake available', value: actionSummary.retake, hint: 'Failed with attempts remaining', tone: 'border-amber-200 bg-amber-50 text-amber-800' },
+                                    { filter: 'no-attempt' as const, label: 'No attempt yet', value: actionSummary.noAttempt, hint: 'Invited but not submitted', tone: 'border-sky-200 bg-sky-50 text-sky-800' },
+                                    { filter: 'learning-stalled' as const, label: 'Learning stalled', value: actionSummary.lowProgress, hint: 'Assigned and below 60%', tone: 'border-slate-200 bg-slate-50 text-slate-800' },
                                 ].map((item) => (
-                                    <div key={item.label} className={`rounded-2xl border p-5 ${item.tone}`}>
+                                    <Link
+                                        key={item.label}
+                                        href={`/admin/training-ops?learnerFilter=${item.filter}#people`}
+                                        className={`group rounded-2xl border p-5 transition-colors hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#008ebc] focus-visible:ring-offset-2 ${item.tone}`}
+                                    >
                                         <p className="text-xs font-semibold uppercase tracking-[0.15em] opacity-70">{item.label}</p>
                                         <p className="mt-3 text-3xl font-semibold tracking-[-0.04em]">{item.value}</p>
-                                        <p className="mt-2 text-sm opacity-75">{item.hint}</p>
-                                    </div>
+                                        <p className="mt-2 text-sm opacity-75">{item.hint} · <span className="font-medium underline underline-offset-4">View learners</span></p>
+                                    </Link>
                                 ))}
                             </div>
                             <Card className="border-slate-200 bg-white shadow-sm">
@@ -491,12 +489,24 @@ export default function TrainingOpsDashboardPage() {
                                 <CardHeader>
                                     <div className="flex flex-wrap items-center justify-between gap-4">
                                         <div>
-                                            <CardTitle className="text-xl text-slate-950">All learners</CardTitle>
-                                            <CardDescription>{filteredLearners.length} learners in the current scope.</CardDescription>
+                                            <CardTitle className="text-xl text-slate-950">
+                                                {learnerActionFilter ? ACTION_FILTER_LABELS[learnerActionFilter] : 'All learners'}
+                                            </CardTitle>
+                                            <CardDescription>
+                                                {filteredLearners.length} learners in the current scope.
+                                                {learnerActionFilter ? ' This list is filtered from Action Center.' : ''}
+                                            </CardDescription>
                                         </div>
-                                        <div className="relative w-full sm:w-80">
-                                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                                            <Input value={learnerSearch} onChange={(event) => setLearnerSearch(event.target.value)} placeholder="Search learner, team, risk" className="pl-9" />
+                                        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+                                            {learnerActionFilter ? (
+                                                <Link href="/admin/training-ops#people">
+                                                    <Button variant="outline" size="sm">Clear action filter</Button>
+                                                </Link>
+                                            ) : null}
+                                            <div className="relative w-full sm:w-80">
+                                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                                <Input value={learnerSearch} onChange={(event) => setLearnerSearch(event.target.value)} placeholder="Search learner, team, risk" className="pl-9" />
+                                            </div>
                                         </div>
                                     </div>
                                 </CardHeader>

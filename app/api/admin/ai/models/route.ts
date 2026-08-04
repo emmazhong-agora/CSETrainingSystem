@@ -63,7 +63,10 @@ export const GET = withAdminAuth(async () => {
         }
 
         const openAIModels = await fetchOpenAIModels()
-        const openAIData = openAIModels.length > 0 ? openAIModels : getFallbackOpenAIModelOptions()
+        // Keep configured fallbacks selectable even when the provider catalog is incomplete.
+        const openAIData = Array.from(
+            new Map([...getFallbackOpenAIModelOptions(), ...openAIModels].map((model) => [model.id, model])).values(),
+        ).sort((a, b) => b.id.localeCompare(a.id, undefined, { numeric: true }))
         const vexkeData = getFallbackVexkeModelOptions()
         const data = [...openAIData, ...vexkeData]
         const source = openAIModels.length > 0 ? 'mixed' : 'fallback'
