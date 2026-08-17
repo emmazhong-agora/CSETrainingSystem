@@ -35,6 +35,7 @@ export interface GenerationConfig {
     essay?: number;
   };
   difficulty: DifficultyLevel | 'mixed';
+  choiceOptionCount?: 4 | 5 | 6;
   lessonIds?: string[];
   topics?: string[];
   focusAreas?: string[];
@@ -85,6 +86,14 @@ export class ExamGenerationService {
 
   constructor() {
     this.knowledgeService = new KnowledgeContextService();
+  }
+
+  private normalizeChoiceOptionCount(value: number | undefined): 4 | 5 | 6 {
+    return value === 5 || value === 6 ? value : 4;
+  }
+
+  private buildPlaceholderOptions(optionCount: number): string[] {
+    return Array.from({ length: optionCount }, (_, index) => `Option ${String.fromCharCode(65 + index)}`);
   }
 
   private augmentEssayQuestion(question: GeneratedQuestion, config: GenerationConfig): GeneratedQuestion {
@@ -271,7 +280,8 @@ export class ExamGenerationService {
           config.topics,
           config.focusAreas,
           promptConfig,
-          coverageHints
+          coverageHints,
+          config.choiceOptionCount
         );
 
         const resolvedQuestion = this.augmentEssayQuestion(result.question, config);
@@ -315,7 +325,10 @@ export class ExamGenerationService {
         );
 
         // Fallback: generate a placeholder question so the request still yields output.
-        const fallback = this.augmentEssayQuestion(this.buildFallbackQuestion(job.type, difficulty), config);
+        const fallback = this.augmentEssayQuestion(
+          this.buildFallbackQuestion(job.type, difficulty, config.choiceOptionCount),
+          config
+        );
         const created = await ExamService.addQuestion(examId, {
           type: job.type,
           difficulty: fallback.difficulty,
@@ -372,7 +385,10 @@ export class ExamGenerationService {
         const difficulty = config.difficulty === 'mixed'
           ? this.getRandomDifficulty()
           : config.difficulty as DifficultyLevel;
-        const fallback = this.augmentEssayQuestion(this.buildFallbackQuestion(questionType, difficulty), config);
+        const fallback = this.augmentEssayQuestion(
+          this.buildFallbackQuestion(questionType, difficulty, config.choiceOptionCount),
+          config
+        );
         try {
           const created = await ExamService.addQuestion(examId, {
             type: fallback.type,
@@ -670,7 +686,8 @@ export class ExamGenerationService {
     topics?: string[],
     focusAreas?: string[],
     promptConfig?: ResolvedAIPrompt,
-    coverageHints?: QuestionCoverageHints
+    coverageHints?: QuestionCoverageHints,
+    choiceOptionCount?: number
   ): Promise<{ question: GeneratedQuestion; tokensUsed: number; generationPrompt: string }> {
     const knowledgePrefixHash = createHash('sha256').update(knowledgePrefix).digest('hex');
     const taskPrompt = this.buildGenerationTaskPrompt(
@@ -679,7 +696,8 @@ export class ExamGenerationService {
       topics,
       focusAreas,
       knowledgePrefixHash,
-      coverageHints
+      coverageHints,
+      choiceOptionCount
     );
     const effectivePromptConfig =
       promptConfig ??
@@ -694,8 +712,12 @@ export class ExamGenerationService {
     });
 
     // Call the configured LLM provider.
+    const normalizedChoiceOptionCount = this.normalizeChoiceOptionCount(choiceOptionCount);
+    const choicePolicy = type === ExamQuestionType.SINGLE_CHOICE || type === ExamQuestionType.MULTIPLE_CHOICE
+      ? `\n\nFor this request, generate exactly ${normalizedChoiceOptionCount} answer options labeled A-${String.fromCharCode(64 + normalizedChoiceOptionCount)}. This request-specific rule overrides any default four-option instruction.`
+      : '';
     const messages = [
-      { role: 'system' as const, content: effectivePromptConfig.systemPrompt },
+      { role: 'system' as const, content: `${effectivePromptConfig.systemPrompt}${choicePolicy}` },
       { role: 'user' as const, content: prompt },
     ];
     const response = await createLLMChatCompletion({
@@ -712,7 +734,7 @@ export class ExamGenerationService {
     });
 
     const result = JSON.parse(response.content || '{}');
-    const normalized = this.normalizeGeneratedQuestion(type, difficulty, result);
+    const normalized = this.normalizeGeneratedQuestion(type, difficulty, result, normalizedChoiceOptionCount);
 
     return {
       question: {
@@ -737,13 +759,18 @@ export class ExamGenerationService {
    * Normalize OpenAI output into the canonical DB format.
    *
    * Canonical formats (matches admin UI + schema comment):
-   * - SINGLE_CHOICE: `correctAnswer` is the option index as a string: "0".."3"
+   * - SINGLE_CHOICE: `correctAnswer` is the option index as a string: "0".."5"
    * - MULTIPLE_CHOICE: `correctAnswer` is a comma-separated list of option indexes, e.g. "0,2"
    * - TRUE_FALSE: `correctAnswer` is "true" or "false"
    * - FILL_IN_BLANK: free-form string (not auto-graded)
    * - ESSAY: use rubric + sampleAnswer; `correctAnswer` is not required
    */
-  private normalizeGeneratedQuestion(type: ExamQuestionType, difficulty: DifficultyLevel, raw: any): GeneratedQuestion {
+  private normalizeGeneratedQuestion(
+    type: ExamQuestionType,
+    difficulty: DifficultyLevel,
+    raw: any,
+    choiceOptionCount = 4
+  ): GeneratedQuestion {
     const question = typeof raw?.question === 'string' ? raw.question.trim() : '';
     const explanation = typeof raw?.explanation === 'string' ? raw.explanation.trim() : undefined;
     const topic = typeof raw?.topic === 'string' ? raw.topic.trim() : undefined;
@@ -759,13 +786,14 @@ export class ExamGenerationService {
             .filter((o: string) => o.length > 0)
         : [];
 
-      // The model occasionally returns fewer/more than 4 options; normalize to exactly 4 instead of dropping the question.
+      const expectedOptionCount = this.normalizeChoiceOptionCount(choiceOptionCount);
+      // Normalize model output to the option count selected for this generation run.
       if (options.length === 0) {
-        options = ['Option A', 'Option B', 'Option C', 'Option D'];
-      } else if (options.length !== 4) {
-        options = options.slice(0, 4);
-        while (options.length < 4) {
-          const label = String.fromCharCode(65 + options.length); // A, B, C, D
+        options = this.buildPlaceholderOptions(expectedOptionCount);
+      } else if (options.length !== expectedOptionCount) {
+        options = options.slice(0, expectedOptionCount);
+        while (options.length < expectedOptionCount) {
+          const label = String.fromCharCode(65 + options.length);
           options.push(`Option ${label}`);
         }
       }
@@ -993,9 +1021,13 @@ export class ExamGenerationService {
   /**
    * Build a deterministic fallback question when AI generation fails.
    */
-  private buildFallbackQuestion(type: ExamQuestionType, difficulty: DifficultyLevel): GeneratedQuestion {
+  private buildFallbackQuestion(
+    type: ExamQuestionType,
+    difficulty: DifficultyLevel,
+    choiceOptionCount?: number
+  ): GeneratedQuestion {
     const baseQuestion = 'Placeholder question generated due to AI failure.';
-    const options = ['Option A', 'Option B', 'Option C', 'Option D'];
+    const options = this.buildPlaceholderOptions(this.normalizeChoiceOptionCount(choiceOptionCount));
 
     switch (type) {
       case ExamQuestionType.SINGLE_CHOICE:
@@ -1063,7 +1095,7 @@ Rules:
 1. Questions must be directly based on the provided content
 2. Questions should test understanding, not just memorization
 3. All information in questions must be factually accurate
-4. Multiple choice questions should have exactly 4 options with 1 correct answer
+4. Multiple choice questions should use the request-specific option count (4 to 6 options)
 5. Distractors (wrong options) should be plausible but clearly incorrect
 6. Essay questions should have clear rubrics and sample answers
 7. Always provide explanations for the correct answers
@@ -1080,7 +1112,8 @@ Output format: JSON object with the following structure based on question type.`
     topics?: string[],
     focusAreas?: string[],
     knowledgePrefixHash?: string,
-    coverageHints?: QuestionCoverageHints
+    coverageHints?: QuestionCoverageHints,
+    choiceOptionCount?: number
   ): string {
     const difficultyDesc = {
       [DifficultyLevel.EASY]: 'basic understanding, straightforward questions',
@@ -1089,21 +1122,25 @@ Output format: JSON object with the following structure based on question type.`
     };
 
     let typePrompt = '';
+    const optionCount = this.normalizeChoiceOptionCount(choiceOptionCount);
+    const lastOptionLabel = String.fromCharCode(64 + optionCount);
+    const optionIndexes = Array.from({ length: optionCount }, (_, index) => index).join(',');
+    const optionExample = JSON.stringify(this.buildPlaceholderOptions(optionCount));
 
     switch (type) {
       case ExamQuestionType.SINGLE_CHOICE:
         typePrompt = `Generate a SINGLE CHOICE question with:
 - A clear question stem
-- Exactly 4 options labeled A, B, C, D
+- Exactly ${optionCount} options labeled A through ${lastOptionLabel}
 - Exactly one correct answer
-- Return the single correct answer index as an integer from 0 to 3
+- Return the single correct answer index as an integer from 0 to ${optionCount - 1}
 - An explanation of why the answer is correct
-- Do NOT systematically place the correct answer in A/B; distribute answer positions across 0,1,2,3 over multiple questions
+- Do NOT systematically place the correct answer in A/B; distribute answer positions across ${optionIndexes} over multiple questions
 
 Output JSON:
 {
   "question": "The question text",
-  "options": ["Option A", "Option B", "Option C", "Option D"],
+  "options": ${optionExample},
   "correctAnswerIndex": 2,
   "explanation": "Why the answer is correct",
   "topic": "Main topic tested",
@@ -1114,15 +1151,15 @@ Output JSON:
       case ExamQuestionType.MULTIPLE_CHOICE:
         typePrompt = `Generate a MULTIPLE CHOICE question with:
 - A clear question stem
-- Exactly 4 options labeled A, B, C, D (one or more correct answers)
-- Return all correct answers in an array (indexes 0-3)
+- Exactly ${optionCount} options labeled A through ${lastOptionLabel} (one or more correct answers)
+- Return all correct answers in an array (indexes 0-${optionCount - 1})
 - An explanation of why the correct answer(s) are correct
-- Do NOT systematically place correct answers in A/B; distribute answer positions across 0,1,2,3 over multiple questions
+- Do NOT systematically place correct answers in A/B; distribute answer positions across ${optionIndexes} over multiple questions
 
 Output JSON:
 {
   "question": "The question text",
-  "options": ["Option A", "Option B", "Option C", "Option D"],
+  "options": ${optionExample},
   "correctAnswerIndexes": [2],
   "explanation": "Why the answer(s) are correct",
   "topic": "Main topic tested",
@@ -1417,7 +1454,10 @@ ${typePrompt}`;
       config?.difficulty as DifficultyLevel || existingQuestion.difficulty,
       knowledgePrefix,
       config?.topics,
-      config?.focusAreas
+      config?.focusAreas,
+      undefined,
+      undefined,
+      config?.choiceOptionCount ?? (existingQuestion.options as string[] | null)?.length
     );
 
     // Update the question

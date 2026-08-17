@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { DashboardLayout } from '@/components/layout/dashboard-layout'
@@ -132,6 +132,24 @@ const exportLearnersCsv = (report: TrainingOpsAdminReport) => {
 }
 
 export default function TrainingOpsDashboardPage() {
+    return (
+        <Suspense fallback={<TrainingOpsDashboardFallback />}>
+            <TrainingOpsDashboardContent />
+        </Suspense>
+    )
+}
+
+function TrainingOpsDashboardFallback() {
+    return (
+        <DashboardLayout>
+            <div className="flex min-h-[50vh] items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        </DashboardLayout>
+    )
+}
+
+function TrainingOpsDashboardContent() {
     const searchParams = useSearchParams()
     const [report, setReport] = useState<TrainingOpsAdminReport | null>(null)
     const [loading, setLoading] = useState(true)

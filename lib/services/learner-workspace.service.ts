@@ -349,7 +349,6 @@ export class LearnerWorkspaceService {
                         title: exam.learningEvent.title,
                         format: exam.learningEvent.format,
                         scheduledAt: exam.learningEvent.scheduledAt,
-                        startsAt: exam.learningEvent.startsAt,
                         createdAt: exam.learningEvent.createdAt,
                         isRequired: exam.learningEvent.isRequired,
                     }
@@ -371,6 +370,7 @@ export class LearnerWorkspaceService {
             format: string
             status: string
             scheduledAt?: Date | null
+            createdAt: Date
             isRequired: boolean
             domain?: { id: string; name: string; slug: string } | null
             linkedExams: Array<{ id: string; title: string; deadline?: Date | null }>
@@ -384,6 +384,7 @@ export class LearnerWorkspaceService {
                 format: exam.learningEvent.format,
                 status: exam.learningEvent.status,
                 scheduledAt: exam.learningEvent.scheduledAt,
+                createdAt: exam.learningEvent.createdAt,
                 isRequired: exam.learningEvent.isRequired,
                 domain: exam.productDomain,
                 linkedExams: [],

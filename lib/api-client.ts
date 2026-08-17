@@ -1838,6 +1838,7 @@ export class ApiClient {
             essay?: number
         }
         difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | 'mixed'
+        choiceOptionCount?: 4 | 5 | 6
         lessonIds?: string[]
         topics?: string[]
     }): Promise<{ success: boolean; data: ExamQuestion[] }> {

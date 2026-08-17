@@ -398,7 +398,7 @@ const manualQuestionSchema = z.object({
     type: z.nativeEnum(ExamQuestionType),
     difficulty: z.nativeEnum(DifficultyLevel).optional(),
     question: z.string().trim().min(1),
-    options: z.array(z.string().trim().min(1)).optional(),
+    options: z.array(z.string().trim().min(1)).min(2).max(6).optional(),
     correctAnswer: z.union([
         z.string().trim(),
         z.number(),
@@ -432,6 +432,7 @@ const designExamQuestionsSchema = z
         questionCount: z.number().int().positive().max(100).optional(),
         difficultyMix: z.union([z.nativeEnum(DifficultyLevel), z.literal('mixed')]).optional(),
         questionTypes: z.array(z.nativeEnum(ExamQuestionType)).optional(),
+        choiceOptionCount: z.union([z.literal(4), z.literal(5), z.literal(6)]).optional(),
         coverageNotes: z.string().trim().optional().nullable(),
         generateEssayScoringCriteria: z.boolean().optional(),
         essayScoringStyle: z.enum(['concise', 'standard', 'detailed']).optional(),
@@ -1195,6 +1196,13 @@ export const smeMcpToolDefinitions = [
                     },
                     ...(Array.isArray(parameterExample('design_exam_questions', 'questionTypes')) ? { examples: [parameterExample('design_exam_questions', 'questionTypes')] } : {}),
                 },
+                choiceOptionCount: {
+                    type: 'integer',
+                    description: 'Number of answer options for generated SINGLE_CHOICE and MULTIPLE_CHOICE questions.',
+                    enum: [4, 5, 6],
+                    default: 4,
+                    examples: [6],
+                },
                 coverageNotes: describedStringSchema(parameterDescription('design_exam_questions', 'coverageNotes', 'Optional coverage notes.'), {
                     examples: typeof parameterExample('design_exam_questions', 'coverageNotes') === 'string' ? [parameterExample('design_exam_questions', 'coverageNotes')] : undefined,
                     nullable: true,
@@ -1220,14 +1228,14 @@ export const smeMcpToolDefinitions = [
                             type: { type: 'string', enum: ['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY', 'EXERCISE'] },
                             difficulty: { type: 'string', enum: ['EASY', 'MEDIUM', 'HARD'] },
                             question: { type: 'string' },
-                            options: { type: 'array', items: { type: 'string' } },
+                            options: { type: 'array', minItems: 2, maxItems: 6, items: { type: 'string' } },
                             correctAnswer: {
                                 anyOf: [
                                     { type: 'string' },
                                     { type: 'number' },
                                     { type: 'array', items: { anyOf: [{ type: 'string' }, { type: 'number' }] } },
                                 ],
-                                description: 'For SINGLE_CHOICE, use A/B/C/D, 0-based index, or exact option text; the MCP normalizes it to "0".."3". For MULTIPLE_CHOICE, use comma-separated letters/indexes/text or an array; it normalizes to "0,2".',
+                                description: 'For SINGLE_CHOICE, use A-F, a 0-based index, or exact option text; the MCP normalizes it to an option index. For MULTIPLE_CHOICE, use comma-separated letters/indexes/text or an array.',
                             },
                             rubric: { type: 'string' },
                             sampleAnswer: { type: 'string' },

@@ -951,6 +951,7 @@ export interface LearnerTrainingOverview {
         format: string
         status: string
         scheduledAt?: string | Date | null
+        createdAt: string | Date
         isRequired: boolean
         domain?: {
             id: string
@@ -993,7 +994,6 @@ export interface LearnerTrainingOverview {
             title: string
             format: string
             scheduledAt?: string | Date | null
-            startsAt?: string | Date | null
             createdAt: string | Date
             isRequired: boolean
         } | null

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
@@ -45,6 +45,24 @@ const isTrainingDrilldown = (value: string | null): value is TrainingDrilldown =
 const PAGE_SIZE = 5
 
 export default function TrainingPage() {
+    return (
+        <Suspense fallback={<TrainingPageFallback />}>
+            <TrainingPageContent />
+        </Suspense>
+    )
+}
+
+function TrainingPageFallback() {
+    return (
+        <DashboardLayout>
+            <div className="flex min-h-[50vh] items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        </DashboardLayout>
+    )
+}
+
+function TrainingPageContent() {
     const searchParams = useSearchParams()
     const [trainingOverview, setTrainingOverview] = useState<LearnerTrainingOverview | null>(null)
     const [progressOverview, setProgressOverview] = useState<UserProgressOverview | null>(null)
@@ -140,7 +158,7 @@ export default function TrainingPage() {
 
     const filteredEvents = useMemo(
         () => trainingOverview?.upcomingEvents.filter((event) =>
-            isWithinDateRange(event.startsAt ?? event.scheduledAt ?? event.createdAt)
+            isWithinDateRange(event.scheduledAt ?? event.createdAt)
         ) ?? [],
         [isWithinDateRange, trainingOverview]
     )

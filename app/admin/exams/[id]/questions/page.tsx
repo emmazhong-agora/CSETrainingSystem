@@ -44,6 +44,16 @@ const questionTypeLabels: Record<ExamQuestionType, string> = {
     EXERCISE: 'Exercise',
 }
 
+const DEFAULT_CHOICE_OPTIONS = ['', '', '', '']
+const MIN_CHOICE_OPTIONS = 2
+const MAX_CHOICE_OPTIONS = 6
+
+const normalizeEditorOptions = (options?: string[] | null) => {
+    const normalized = options?.length ? options.slice(0, MAX_CHOICE_OPTIONS) : [...DEFAULT_CHOICE_OPTIONS]
+    while (normalized.length < MIN_CHOICE_OPTIONS) normalized.push('')
+    return normalized
+}
+
 const difficultyColors: Record<string, string> = {
     EASY: 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-200',
     MEDIUM: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-200',
@@ -90,7 +100,7 @@ interface QuestionForm {
 const defaultQuestionForm: QuestionForm = {
     type: 'SINGLE_CHOICE',
     question: '',
-    options: ['', '', '', ''],
+    options: [...DEFAULT_CHOICE_OPTIONS],
     correctAnswer: '',
     multiCorrectAnswers: [],
     explanation: '',
@@ -217,6 +227,7 @@ function ExamQuestionsPageContent({ params }: PageProps) {
         trueFalse: 3,
         fillInBlank: 2,
         essay: 1,
+        choiceOptionCount: 4 as 4 | 5 | 6,
         difficulty: 'mixed' as 'EASY' | 'MEDIUM' | 'HARD' | 'mixed',
     })
 
@@ -340,7 +351,7 @@ function ExamQuestionsPageContent({ params }: PageProps) {
         setForm({
             type: question.type,
             question: question.question,
-            options: question.options || ['', '', '', ''],
+            options: normalizeEditorOptions(question.options),
             correctAnswer: question.correctAnswer || '',
             multiCorrectAnswers: parsedMultiAnswers,
             explanation: question.explanation || '',
@@ -460,6 +471,9 @@ function ExamQuestionsPageContent({ params }: PageProps) {
                 form.type === 'SINGLE_CHOICE' || form.type === 'MULTIPLE_CHOICE'
                     ? form.options.map(o => o.trim())
                     : undefined
+            if (normalizedOptions?.some((option) => !option)) {
+                throw new Error('All answer options must contain text')
+            }
 
             const payloadCorrectAnswer = (() => {
                 if (!hasCorrectAnswer) return undefined
@@ -538,7 +552,7 @@ function ExamQuestionsPageContent({ params }: PageProps) {
                     setForm({
                         type: savedQuestion.type,
                         question: savedQuestion.question,
-                        options: savedQuestion.options || ['', '', '', ''],
+                        options: normalizeEditorOptions(savedQuestion.options),
                         correctAnswer: savedQuestion.correctAnswer || '',
                         multiCorrectAnswers: savedQuestion.correctAnswer
                             ? savedQuestion.correctAnswer.split(',').map(s => s.trim()).filter(Boolean)
@@ -600,6 +614,7 @@ function ExamQuestionsPageContent({ params }: PageProps) {
                     essay: generateConfig.essay,
                 },
                 difficulty: generateConfig.difficulty,
+                choiceOptionCount: generateConfig.choiceOptionCount,
                 lessonIds: selectedLessonIds,
             }
 
@@ -628,6 +643,34 @@ function ExamQuestionsPageContent({ params }: PageProps) {
             ...prev,
             options: prev.options.map((o, i) => i === index ? value : o),
         }))
+    }
+
+    const addOption = () => {
+        setForm((prev) => prev.options.length >= MAX_CHOICE_OPTIONS
+            ? prev
+            : { ...prev, options: [...prev.options, ''] })
+    }
+
+    const removeOption = (index: number) => {
+        setForm((prev) => {
+            if (prev.options.length <= MIN_CHOICE_OPTIONS) return prev
+
+            const remapIndex = (value: string) => {
+                const parsed = Number.parseInt(value, 10)
+                if (!Number.isInteger(parsed)) return value
+                if (parsed === index) return ''
+                return parsed > index ? String(parsed - 1) : value
+            }
+
+            return {
+                ...prev,
+                options: prev.options.filter((_, optionIndex) => optionIndex !== index),
+                correctAnswer: remapIndex(prev.correctAnswer),
+                multiCorrectAnswers: prev.multiCorrectAnswers
+                    .map(remapIndex)
+                    .filter(Boolean),
+            }
+        })
     }
 
     const updateCriterion = <K extends keyof EssayGradingCriterion>(
@@ -1048,8 +1091,35 @@ function ExamQuestionsPageContent({ params }: PageProps) {
                                                     onChange={(e) => updateOption(index, e.target.value)}
                                                     placeholder={`Option ${String.fromCharCode(65 + index)}`}
                                                 />
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-9 w-9 shrink-0"
+                                                    disabled={form.options.length <= MIN_CHOICE_OPTIONS}
+                                                    onClick={() => removeOption(index)}
+                                                    aria-label={`Remove option ${String.fromCharCode(65 + index)}`}
+                                                    title={`Remove option ${String.fromCharCode(65 + index)}`}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
                                             </div>
                                         ))}
+                                        <div className="flex items-center justify-between gap-3 pt-1">
+                                            <p className="text-xs text-muted-foreground">
+                                                {form.options.length} options · labels A-{String.fromCharCode(64 + form.options.length)}
+                                            </p>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={form.options.length >= MAX_CHOICE_OPTIONS}
+                                                onClick={addOption}
+                                            >
+                                                <Plus className="mr-2 h-4 w-4" />
+                                                Add option
+                                            </Button>
+                                        </div>
                                     </div>
                                 )}
 
@@ -1399,6 +1469,24 @@ function ExamQuestionsPageContent({ params }: PageProps) {
                                     <option value="EASY">Easy</option>
                                     <option value="MEDIUM">Medium</option>
                                     <option value="HARD">Hard</option>
+                                </select>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Choice options</Label>
+                                <select
+                                    className="h-10 w-full rounded-md border bg-background px-3"
+                                    value={generateConfig.choiceOptionCount}
+                                    onChange={(e) =>
+                                        setGenerateConfig((prev) => ({
+                                            ...prev,
+                                            choiceOptionCount: Number(e.target.value) as 4 | 5 | 6,
+                                        }))
+                                    }
+                                >
+                                    <option value={4}>4 options (A-D)</option>
+                                    <option value={5}>5 options (A-E)</option>
+                                    <option value={6}>6 options (A-F)</option>
                                 </select>
                             </div>
 

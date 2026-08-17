@@ -1497,6 +1497,22 @@ export const smeMcpToolMetadata: SmeMcpToolMetadata[] = [
                 defaultBehavior: 'Defaults to SINGLE_CHOICE for generation modes.',
             },
             {
+                name: 'choiceOptionCount',
+                label: 'Choice Option Count',
+                inputKind: 'enum',
+                required: 'optional',
+                type: '4 | 5 | 6',
+                description: 'Number of options generated for single-choice and multiple-choice questions.',
+                howToFill: 'Choose 6 when answer choices A through F are required.',
+                acceptedValues: [
+                    enumOption('4', 'A-D'),
+                    enumOption('5', 'A-E'),
+                    enumOption('6', 'A-F'),
+                ],
+                example: 6,
+                defaultBehavior: 'Defaults to 4 options (A-D).',
+            },
+            {
                 name: 'coverageNotes',
                 label: 'Coverage Notes',
                 inputKind: 'free_text',

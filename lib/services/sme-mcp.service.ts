@@ -1734,6 +1734,7 @@ export class SmeMcpService {
             questionCount?: number
             difficultyMix?: DifficultyLevel | 'mixed'
             questionTypes?: Array<ExamQuestionType>
+            choiceOptionCount?: 4 | 5 | 6
             coverageNotes?: string | null
             generateEssayScoringCriteria?: boolean
             essayScoringStyle?: EssayScoringStyle
@@ -1968,6 +1969,7 @@ export class SmeMcpService {
             const generationResult = await generationService.generateQuestions(exam.id, {
                 questionCounts,
                 difficulty: input.difficultyMix ?? 'mixed',
+                choiceOptionCount: input.choiceOptionCount,
                 focusAreas,
                 topics: focusAreas,
                 generateEssayScoringCriteria: effectiveGenerateEssayScoringCriteria,
